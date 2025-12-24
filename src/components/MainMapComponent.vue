@@ -447,7 +447,9 @@ const loadJpSeedlinkStations = async () => {
 
     const fetchStationText = async (net) => {
         const urls = [
-            `/iris/fdsnws/station/1/query?net=${encodeURIComponent(net)}&level=station&format=text&nodata=404`,
+            ...(import.meta.env.DEV
+                ? [`/iris/fdsnws/station/1/query?net=${encodeURIComponent(net)}&level=station&format=text&nodata=404`]
+                : []),
             `https://service.iris.edu/fdsnws/station/1/query?net=${encodeURIComponent(net)}&level=station&format=text&nodata=404`,
         ]
 
@@ -2261,19 +2263,26 @@ let tremTimeout;
 
 const tremStationProxyBase = computed(() => {
     const selected = settingsStore.mainSettings.displaySeisNet.tremApi;
+    const isDev = import.meta.env.DEV
+
     // station APIは api-1/api-2
-    if (selected === 'api-2') return '/exptech-api-2'
+    if (selected === 'api-2') return isDev ? '/exptech-api-2' : 'https://api-2.exptech.dev'
+
     // lb-* が選ばれても、stationは api-1 を使う（Zero-Quakeもフェイルオーバーあり）
-    return '/exptech-api-1'
+    return isDev ? '/exptech-api-1' : 'https://api-1.exptech.dev'
 })
 
 const tremRtsProxyBase = computed(() => {
     const selected = settingsStore.mainSettings.displaySeisNet.tremApi;
+    const isDev = import.meta.env.DEV
+
     // rts APIは lb-1..lb-4
-    if (selected?.startsWith('lb-')) return `/exptech-${selected}`
+    if (selected?.startsWith('lb-')) {
+        return isDev ? `/exptech-${selected}` : `https://${selected}.exptech.dev`
+    }
     // api-1/api-2 の場合は対応する lb-1/lb-2
-    if (selected === 'api-2') return '/exptech-lb-2'
-    return '/exptech-lb-1'
+    if (selected === 'api-2') return isDev ? '/exptech-lb-2' : 'https://lb-2.exptech.dev'
+    return isDev ? '/exptech-lb-1' : 'https://lb-1.exptech.dev'
 })
 
 const tremRtsShindoColorMap = {
@@ -2569,7 +2578,8 @@ const loadMsilNet = async () => {
     }
 
     try {
-        const targetTimesRes = await fetch(`/msil/tiles/smoni/targetTimes.json?_=${Date.now()}`);
+        const msilBase = import.meta.env.DEV ? '/msil' : 'https://www.msil.go.jp'
+        const targetTimesRes = await fetch(`${msilBase}/tiles/smoni/targetTimes.json?_=${Date.now()}`);
         const targetTimes = await targetTimesRes.json();
         if (!Array.isArray(targetTimes)) throw new Error('Invalid targetTimes format');
 
@@ -2588,8 +2598,8 @@ const loadMsilNet = async () => {
             msil_lastTime = basetime;
             const unique_id = Date.now();
             const urls = [
-                { url: `/msil/tiles/smoni/${basetime}/${basetime}/5/28/11.png?_=${unique_id}`, y: 11 },
-                { url: `/msil/tiles/smoni/${basetime}/${basetime}/5/28/12.png?_=${unique_id}`, y: 12 }
+                { url: `${msilBase}/tiles/smoni/${basetime}/${basetime}/5/28/11.png?_=${unique_id}`, y: 11 },
+                { url: `${msilBase}/tiles/smoni/${basetime}/${basetime}/5/28/12.png?_=${unique_id}`, y: 12 }
             ];
 
             urls.forEach(async ({ url, y }) => {
