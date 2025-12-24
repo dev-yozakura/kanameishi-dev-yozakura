@@ -1,5 +1,5 @@
 let Spoints;
-fetch('/resources/Snet_Points.json')
+fetch(`${import.meta.env.BASE_URL}resources/Snet_Points.json`)
     .then(res => res.json())
     .then(json => {
         Spoints = json.filter(elm => elm.Point && !elm.IsSuspended);
@@ -13,7 +13,7 @@ function RGBtoP(r, g, b) {
     const min = Math.min(r, g, b);
     let h = 0;
     let s = 0;
-    const v = max;
+    let v = max;
     if (max != min) {
         if (max == r) h = (60 * (g - b)) / (max - min);
         if (max == g) h = (60 * (b - r)) / (max - min) + 120;

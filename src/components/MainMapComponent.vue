@@ -2536,7 +2536,7 @@ const loadMsilNet = async () => {
     // 観測点（マーカー）の初期化：msilNet のON/OFFに関係なく一度だけ生成
     if (Object.keys(msilStations.value).length === 0) {
         try {
-            const response = await fetch('/resources/Snet_Points.json');
+            const response = await fetch(`${import.meta.env.BASE_URL}resources/Snet_Points.json`);
             const points = await response.json();
             msilNetLayer.clearLayers();
             const stations = {};
