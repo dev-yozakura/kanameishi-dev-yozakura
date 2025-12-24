@@ -8,12 +8,18 @@ import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => {
+  const isTauri = !!process.env.TAURI_ENV_PLATFORM
+  const base =
+    command === 'build' && !isTauri ? (process.env.BASE_URL ?? '/') : '/'
+
+  return {
+    base,
   // 防止 Vite 清除 Rust 显示的错误
   clearScreen: false,
   server: {
     // Tauri 工作于固定端口，如果端口不可用则报错
-    strictPort: true,
+    strictPort: isTauri,
     // 如果设置了 host，Tauri 则会使用
     host: 'localhost',
     port: 5173,
@@ -130,5 +136,6 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
+  }
   }
 })
