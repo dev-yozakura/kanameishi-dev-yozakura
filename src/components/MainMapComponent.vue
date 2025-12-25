@@ -354,12 +354,12 @@ import { useSettingsStore } from '@/stores/settings';
 import { useTimeStore } from '@/stores/time';
 import EqlistComponent from './EqlistComponent.vue';
 import SettingsComponent from './SettingsComponent.vue';
-import { verifyUpToDate, setClassName, getClassLevel, classNameArray, pointDistToCnArea, csisArray, shindoArray, calcCsisLevel, calcJmaShindoLevel, formatTimeZone, simplifyTopoJson, formatCsis, csisRomanArray, formatShindo, stampToTime, getShindoFromInstShindo, playSound, sendMyNotification, focusWindow } from '@/utils/Utils';
+import { verifyUpToDate, setClassName, getClassLevel, classNameArray, pointDistToCnArea, csisArray, shindoArray, calcCsisLevel, calcJmaShindoLevel, formatTimeZone, simplifyTopoJson, formatCsis, csisRomanArray, formatShindo, stampToTime, getShindoFromInstShindo, getLevelFromInstShindo, playSound, sendMyNotification, focusWindow } from '@/utils/Utils';
 import { topojsonUrls, iconUrls } from '@/utils/Urls';
 import { jmaSeisIntLoc } from '@/utils/JmaSeisIntLoc';
 import { isTauri } from '@tauri-apps/api/core';
 import { storeToRefs } from 'pinia';
-import { simpleIcon } from '@/classes/StationClasses';
+import { simpleIcon, computeNiedStyleColorRadius } from '@/classes/StationClasses';
 import { feature } from 'topojson-client';
 import { cnCityLabels, cnProvinceLabels, jpPrefLabels } from '@/utils/Labels';
 import terminator from '@joergdietrich/leaflet.terminator';
@@ -1329,6 +1329,10 @@ onMounted(() => {
     eewMarkerPane.style.zIndex = 200
     map.on('dragstart', handleManual)
     map.on('zoomend', () => zoomLevel.value = map.getZoom())
+    map.on('zoomend', () => {
+        // Keep MSIL markers scaled like NIED even without new frames.
+        if (settingsStore.mainSettings.displaySeisNet.msilNet) refreshMsilMarkerStyleForZoom()
+    })
     if(settingsStore.advancedSettings.preventFlickerMode){
         map.on('zoomstart', ()=>{setMapHeight('calc(100% - 1px)');})
         map.on('zoomend', ()=>{setMapHeight('100%');})
@@ -2285,12 +2289,6 @@ const tremRtsProxyBase = computed(() => {
     return isDev ? '/exptech-lb-1' : 'https://lb-1.exptech.dev'
 })
 
-const tremRtsShindoColorMap = {
-    '-3': '#0000CD', '-2': '#0048FA', '-1': '#00D08B', '0': '#3FFA36',
-    '1': '#BFFF0C', '2': '#FFFF00', '3': '#FFDD00', '4': '#FF9000',
-    '5': '#FF4400', '6': '#F50000', '7': '#AA0000'
-}
-
 const tremRtsMaxInst = ref(null)
 const tremRtsCurrentBin = computed(() => instToShindoBin(tremRtsMaxInst.value))
 const tremRtsShakeFlags = reactive({ shake1Notified: false, shake2Notified: false, focused: false })
@@ -2312,20 +2310,10 @@ watch(
     }
 )
 
-const getTremRtsShindoColor = (shindo) => {
-    if (shindo === null || shindo === undefined) return '#808080'
-    const level = Math.floor(shindo)
-    if (level >= 7) return tremRtsShindoColorMap['7']
-    if (level >= 6) return tremRtsShindoColorMap['6']
-    if (level >= 5) return tremRtsShindoColorMap['5']
-    if (level >= 4) return tremRtsShindoColorMap['4']
-    if (level >= 3) return tremRtsShindoColorMap['3']
-    if (level >= 2) return tremRtsShindoColorMap['2']
-    if (level >= 1) return tremRtsShindoColorMap['1']
-    if (level >= 0) return tremRtsShindoColorMap['0']
-    if (level >= -1) return tremRtsShindoColorMap['-1']
-    if (level >= -2) return tremRtsShindoColorMap['-2']
-    return tremRtsShindoColorMap['-3']
+const _getTremRtsNiedStyle = (instShindo) => {
+    const zoom = map?.getZoom?.() ?? settingsStore.mainSettings.defaultZoom
+    const level = getLevelFromInstShindo(Number.isFinite(instShindo) ? instShindo : -3.1)
+    return computeNiedStyleColorRadius(level, zoom)
 }
 
 const updateTremMarkers = (data) => {
@@ -2343,15 +2331,25 @@ const updateTremMarkers = (data) => {
             const oldBin = (id in tremRtsPrevBins) ? tremRtsPrevBins[id] : -1
             if (newBin > oldBin) risingCount += 1
             tremRtsPrevBins[id] = newBin
+            const { color, radius } = _getTremRtsNiedStyle(shindo)
             station.marker.setStyle({
-                fillColor: getTremRtsShindoColor(shindo),
-                fillOpacity: shindo !== null ? 0.8 : 0.2,
+                color,
+                fillColor: color,
+                opacity: 1,
+                fillOpacity: 1,
+                weight: 0,
             });
+            station.marker.setRadius(radius)
         } else if (station.marker) {
+            const { color, radius } = _getTremRtsNiedStyle(null)
             station.marker.setStyle({
-                fillColor: '#808080',
-                fillOpacity: 0.2,
-            });
+                color,
+                fillColor: color,
+                opacity: 1,
+                fillOpacity: 1,
+                weight: 0,
+            })
+            station.marker.setRadius(radius)
         }
     }
     tremRtsMaxInst.value = max
@@ -2371,12 +2369,14 @@ const loadTremRts = async () => {
             const stations = {};
             for (const id in tremStationInfo) {
                 const info = tremStationInfo[id].info[0];
+                const { color, radius } = _getTremRtsNiedStyle(null)
                 const marker = L.circleMarker([info.lat, info.lon], {
-                    radius: 3,
-                    color: '#808080',
+                    radius,
+                    color,
                     weight: 0,
-                    fillColor: '#808080',
-                    fillOpacity: 0.2,
+                    fillColor: color,
+                    opacity: 1,
+                    fillOpacity: 1,
                     pane: 'tremRtsPane'
                 });
                 marker.bindPopup(`<b>${id}</b>`);
@@ -2419,6 +2419,7 @@ watch(
 
 const msilStations = ref({});
 const msil_latest = {};
+const msilLatestByCode = {};
 let msil_lastTime = '';
 let msilTimeout;
 
@@ -2443,27 +2444,30 @@ watch(
     }
 )
 
-const msilShindoColorMap = {
-    '-3': '#0000CD', '-2': '#0048FA', '-1': '#00D08B', '0': '#3FFA36',
-    '1': '#BFFF0C', '2': '#FFFF00', '3': '#FFDD00', '4': '#FF9000',
-    '5': '#FF4400', '6': '#F50000', '7': '#AA0000'
-};
+const _getMsilNiedStyle = (instShindo) => {
+    const zoom = map?.getZoom?.() ?? settingsStore.mainSettings.defaultZoom
+    const level = getLevelFromInstShindo(Number.isFinite(instShindo) ? instShindo : -3.1)
+    return computeNiedStyleColorRadius(level, zoom)
+}
 
-const getMsilShindoColor = (shindo) => {
-    if (shindo === null || shindo === undefined) return '#808080';
-    const level = Math.floor(shindo);
-    if (level >= 7) return msilShindoColorMap['7'];
-    if (level >= 6) return msilShindoColorMap['6'];
-    if (level >= 5) return msilShindoColorMap['5'];
-    if (level >= 4) return msilShindoColorMap['4'];
-    if (level >= 3) return msilShindoColorMap['3'];
-    if (level >= 2) return msilShindoColorMap['2'];
-    if (level >= 1) return msilShindoColorMap['1'];
-    if (level >= 0) return msilShindoColorMap['0'];
-    if (level >= -1) return msilShindoColorMap['-1'];
-    if (level >= -2) return msilShindoColorMap['-2'];
-    return msilShindoColorMap['-3'];
-};
+const refreshMsilMarkerStyleForZoom = () => {
+    if (!msilStations?.value) return
+    for (const code in msilStations.value) {
+        const station = msilStations.value[code]
+        const marker = station?.marker
+        if (!marker) continue
+        const shindo = msilLatestByCode[code]
+        const { color, radius } = _getMsilNiedStyle(shindo)
+        marker.setStyle({
+            color,
+            fillColor: color,
+            opacity: 1,
+            fillOpacity: 1,
+            weight: 0,
+        })
+        marker.setRadius(radius)
+    }
+}
 
 const formatUtcToBasetime = (timestampMs) => {
     const d = new Date(timestampMs);
@@ -2493,6 +2497,7 @@ const updateMsilMarkers = (data) => {
         const station = msilStations.value[code];
         if (!station?.marker) continue;
         const shindo = data[code]?.shindo;
+        msilLatestByCode[code] = shindo
         if (shindo !== null && shindo !== undefined) {
             max = (max === null) ? shindo : Math.max(max, shindo);
         }
@@ -2500,10 +2505,15 @@ const updateMsilMarkers = (data) => {
         const oldBin = (code in msilPrevBins) ? msilPrevBins[code] : -1
         if (newBin > oldBin) risingCount += 1
         msilPrevBins[code] = newBin
+        const { color, radius } = _getMsilNiedStyle(shindo)
         station.marker.setStyle({
-            fillColor: getMsilShindoColor(shindo),
-            fillOpacity: shindo !== null && shindo !== undefined ? 0.8 : 0.2,
+            color,
+            fillColor: color,
+            opacity: 1,
+            fillOpacity: 1,
+            weight: 0,
         });
+        station.marker.setRadius(radius)
     }
     msilMaxInst.value = max
     msilRisingCount.value = risingCount
@@ -2548,17 +2558,19 @@ const loadMsilNet = async () => {
             const response = await fetch(`${import.meta.env.BASE_URL}resources/Snet_Points.json`);
             const points = await response.json();
             msilNetLayer.clearLayers();
+            const { color, radius } = _getMsilNiedStyle(null)
             const stations = {};
             points.forEach(point => {
                 if (!point.Point || point.IsSuspended) return;
                 const { Latitude: lat, Longitude: lon } = point.Location;
                 const code = point.Code;
                 const marker = L.circleMarker([lat, lon], {
-                    radius: 3,
-                    color: '#808080',
+                    radius,
+                    color,
                     weight: 0,
-                    fillColor: '#808080',
-                    fillOpacity: 0.2,
+                    fillColor: color,
+                    opacity: 1,
+                    fillOpacity: 1,
                     pane: 'msilNetPane'
                 });
                 marker.bindPopup(`<b>${code}</b>`);
@@ -2566,6 +2578,7 @@ const loadMsilNet = async () => {
                 stations[code] = { marker };
             });
             msilStations.value = stations;
+            refreshMsilMarkerStyleForZoom()
         } catch (e) {
             console.error('Failed to initialize MSIL stations:', e);
         }

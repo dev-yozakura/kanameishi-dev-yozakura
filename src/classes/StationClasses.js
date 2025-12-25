@@ -125,6 +125,51 @@ const kmaIntColorBand = [
 
 export const simpleIcon = ref(false)
 
+export const computeNiedStyleColorRadius = (level, zoom, opts = {}) => {
+    if (!settingsStore) settingsStore = useSettingsStore()
+    const style = opts.style ?? settingsStore.mainSettings.displaySeisNet.style
+    const hideNoData = opts.hideNoData ?? settingsStore.mainSettings.displaySeisNet.hideNoData
+    const clampedZoom = Math.min(Math.max(Number(zoom), 4), 10)
+
+    let color
+    let radius
+    switch (style) {
+        case 'nied': {
+            if (level < 0 || level >= colorBand.nied.length) {
+                color = hideNoData ? '#cfcfcf00' : '#cfcfcf'
+            }
+            else {
+                color = colorBand.nied[level]
+            }
+            radius = (level <= 5 ? 2 : 2.5) * 2 ** (clampedZoom / 2 - 3)
+            break
+        }
+        case 'srev': {
+            if (level < 0 || level >= colorBand.srev.length) {
+                color = colorBand.srev[0]
+            }
+            else {
+                color = colorBand.srev[level]
+            }
+            radius = 2.5 * 2 ** (clampedZoom / 2 - 3)
+            break
+        }
+        case 'mix':
+        default: {
+            if (level < 0 || level >= colorBand.mix.length) {
+                color = colorBand.mix[0]
+            }
+            else {
+                color = colorBand.mix[level]
+            }
+            radius = 2.5 * 2 ** (clampedZoom / 2 - 3)
+            break
+        }
+    }
+
+    return { color, radius }
+}
+
 const shindoIcons = {}, intIcons = {}
 for(let zoom = 6; zoom <= 10; zoom ++) {
     let icons = {}
